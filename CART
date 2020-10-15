@@ -1,0 +1,271 @@
+#==================================================#
+#                                                  #
+#               CLASE TUTORIAL NÂ°8                 #
+#                      CART                        #
+#                                                  #
+#==================================================#
+
+# Profesor: Walter Sosa Escudero
+# Tutora: Carla Srebot 
+
+# Referencias:
+# James, Witten, Hastie y Tibshirani(2013) Chaper 8 Lab
+# CART, Bagging, Random Forest, Boosting Conditional Tree     
+
+
+# Directorio
+setwd("C:\\Users\\csreb\\Google Drive\\UdeSA\\Tutoriales - UdeSA\\Primavera 2020 Big Data\\Tutoriales\\Tutorial 8 - CART")
+
+
+# Cargamos los paquetes que necesitamos
+
+library(ISLR)
+library(MASS)
+library(ggplot2)
+
+install.packages("corrplot") #Paquete para matriz de correlaciones fachera
+library(corrplot)
+
+install.packages("RColorBrewer") 
+library(RColorBrewer)
+
+install.packages("tree") # paquete CART 
+library(tree)
+
+install.packages("rpart") # otro paquete con las funciones de CART
+library(rpart)
+
+# PAQUETES PARA HACER LINDOS GRÃFICOS DE ÃRBOLES
+install.packages("rattle")
+install.packages("rpart.plot")
+install.packages("RGtk2")
+
+library(rattle)
+library(rpart.plot)
+library(RGtk2)
+
+
+#-------> Cargamos la base y la analizamos rÃ¡pidamente
+
+fix(Carseats) # Para los que no les ande fix, usar attach(Carseats)
+
+# Vemos las correlaciones entre las variables numÃ©ricas de la base
+Car.corr=cor(Carseats[,-c(7,10,11)])
+# Matriz fachera
+corrplot(Car.corr, method="circle",col=brewer.pal(n=8,name="RdYlBu"))
+
+# CorrelaciÃ³n positiva entre Price y CompPrice (precio de la competencia)
+# CorrelaciÃ³n negativa entre Price y Sales
+
+
+#-------> CLASSIFICATION TREES
+attach(Carseats)
+
+# Construimos una respuesta binaria de Ventas, dado que Sales es continua.
+High=ifelse(Sales<=8,"No","Yes") # "No" serÃ­an pocas ventas, "Yes" muchas ventas
+Carseats=data.frame(Carseats,High)
+
+# Realizamos la estimaciÃ³n de un Ã¡rbol de clasificaciÃ³n.
+
+tree.carseats=tree(High~.,Carseats)
+plot(tree.carseats)
+text(tree.carseats,pretty=0) #para las etiquetas de los nodos
+dev.off()
+
+# No sirve para nada, Â¿verdad?
+# Entonces, Â¿por quÃ© sacamos a Sales?
+tree.carseats=tree(High~.-Sales,Carseats)
+
+# EstimaciÃ³n: summary hace una lista de las variables usadas como nodos internos,
+# el nÃºmero de nodos terminales y la tasa de error de predicciÃ³n.
+summary(tree.carseats)
+
+# Â¿QuÃ© es la "Residual mean deviance" (media de los desvÃ­os)?
+# Un desvÃ­o pequeÃ±o es una seÃ±al de que el Ã¡rbol ajusta bien a los datos
+# de entrenamiento (en este caso estamos usando toda la base).
+
+tree.carseats
+
+# Graficamos un Ã¡rbol
+pdf("tree1.pdf",height=10,width=10,paper="special")
+plot(tree.carseats)
+text(tree.carseats,pretty=0) #para las etiquetas de los nodos
+dev.off()
+
+
+# GrÃ¡fico fachero de un Ã¡rbol
+
+# Primero estimamos el Ã¡rbol "purificado" usando la funciÃ³n rpart
+# para obtener el tipo de objeto necesario para graficar (utiliza el desvÃ­o
+# para guiar la forma de limpiar el Ã¡rbol por CV), 
+tree.carseats2 = rpart(High~.-Sales,Carseats,method = "class")
+
+# Graficamos
+pdf("tree2.pdf",height=10,width=10,paper="special")
+fancyRpartPlot(tree.carseats2,sub="")
+dev.off()
+# Cada nodo nos muestra:
+# la clase predicha
+# la probabilidad de pertenecer a cada clase
+# el porcentaje de observaciones
+# Fuente: http://www.milbo.org/rpart-plot/prp.pdf
+
+
+# Hasta acÃ¡ usamos todos los datos, pero eso mucho no sirve.
+# Usamos el enfoque de validaciÃ³n para evaluar la perfomance.
+
+# Dividimos la muestra
+set.seed(2)
+train=sample(1:nrow(Carseats), 200)
+Carseats.test=Carseats[-train,]
+High.test=High[-train]
+
+# Reestimamos
+tree.carseats=tree(High~.-Sales,Carseats,subset=train)
+
+tree.carseats2 = rpart(High~.-Sales,Carseats,method = "class",subset = train)
+
+# Predecimos (por eso usamos test). Usamos method = "class" para pedirle a R que nos 
+# muestre la predicciÃ³n de la clase.
+
+tree.pred=predict(tree.carseats,Carseats.test,type="class")
+tree.pred2=predict(tree.carseats2,Carseats.test,type="class")
+
+# Matriz de confusiÃ³n
+table(tree.pred,High.test)
+(104+52)/200
+
+table(tree.pred2,High.test)
+(97+58)/200
+
+# Vemos que el Ã¡rbol "limpio" por rpart tiene mayor precisiÃ³n que el Ã¡rbol original
+# Otros paquetes para correr CART: https://www.r-bloggers.com/a-brief-tour-of-the-trees-and-forests/
+# MÃ¡s informaciÃ³n sobre diferencias: http://www.rohitschauhan.com/index.php/2018/06/13/a-comparison-on-using-r-tree-vs-r-rpart/
+
+
+# ---- > Vamos a ver el proceso de pruning por CV del Ã¡rbol original
+
+# Semilla para reproducir los resultados
+set.seed(3)
+
+# Elegimos el nivel de complejidad por CV usando el error de clasificaciÃ³n como guÃ­a
+# (por default, usa deviance)
+cv.carseats=cv.tree(tree.carseats,FUN=prune.misclass)
+
+# Vemos lo que tiene el objeto 
+names(cv.carseats)
+# size es el nÃºmero de nodos terminales
+# dev es el error de clasificaciÃ³n
+# k es el parÃ¡metro de complejidad (penaliza los nodos terminales) --> alfa!
+# method usa el error de clasificaciÃ³n
+
+# Veamos cada uno de dichos objetos
+  cv.carseats
+# el que menor error tiene es el Ã¡rbol con 21 nodos, pero el de 8 tiene casi lo mismo
+
+# Graficamos el error como funciÃ³n de k y de size:
+par(mfrow=c(1,2))
+plot(cv.carseats$size,cv.carseats$dev,type="b")
+plot(cv.carseats$k,cv.carseats$dev,type="b")
+dev.off()
+par(mfrow=c(1,1))
+
+# Limpiamos el Ã¡rbol para obtener un Ã¡rbol con 8 nodos terminales.
+prune.carseats=prune.misclass(tree.carseats,best=8)
+
+# GrÃ¡ficamos
+plot(prune.carseats)
+text(prune.carseats,pretty=0)
+# Obtenemos un Ã¡rbol mucho mÃ¡s pequeÃ±o y similar al estimado por rpart
+
+# Performance
+tree.pred=predict(prune.carseats,Carseats.test,type="class")
+table(tree.pred,High.test)
+(89+62)/200 
+
+# A pesar de que la matriz de confusiÃ³n no es igual, tiene la misma tasa
+# de error que rpart.
+# Ganamos: conseguimos un Ã¡rbol mÃ¡s chiquito y que le pega bien a los datos.
+
+rm(list=ls())
+dev.off()
+
+# -----> REGRESSION TREE
+
+# Usaremos la base Boston para predecir la mediana del valor de las casas "medv"
+fix(Boston)
+
+# Vemos las correlaciones entre las variables numÃ©ricas de la base
+boston.corr=cor(Boston)
+
+# Matriz fachera
+corrplot(boston.corr, method="circle",col=brewer.pal(n=8,name="RdYlBu"))
+
+# Usamos el enfoque de validaciÃ³n
+set.seed(1)
+train = sample(1:nrow(Boston), nrow(Boston)/2)
+
+# Realizamos la estimaciÃ³n del Ã¡rbol de regresiÃ³n
+tree.boston=tree(medv~.,Boston,subset=train)
+tree.boston2=rpart(medv~.,Boston,method="anova",subset=train)
+
+# Vemos los resultados   
+summary(tree.boston)
+# SÃ³lo se usaron 4 variables para construir el Ã¡rbol. El desvÃ­o es la 
+# suma de los residuos al cuadrado. AdemÃ¡s nos muestra la distribuciÃ³n
+# de los residuos.
+# La variable lstat mide el % de individuos con bajo status socieconÃ³mico.
+# Menores valores de lstat llevan a mayores valores de casas.
+
+# Graficamos
+pdf("tree_regression1.pdf",height=10,width=10,paper="special")
+plot(tree.boston)
+text(tree.boston,pretty=0)
+dev.off()
+
+#   
+pdf("tree_regression2.pdf",height=10,width=10,paper="special")
+fancyRpartPlot(tree.boston2,sub="")
+dev.off()
+
+# Prunning del Ã¡rbol
+cv.boston=cv.tree(tree.boston)
+cv.boston
+
+# GrÃ¡fico del error CV
+plot(cv.boston$size,cv.boston$dev,type='b')
+# SegÃºn el grÃ¡fico se debe usar el Ã¡rbol mÃ¡s complejo con 8 nodos
+# terminales (cantidad que originalmente usa)
+
+# Limpiamos el Ã¡rbol para 5 nodos (porque sÃ­)
+prune.boston=prune.tree(tree.boston,best=5)
+
+# GrÃ¡fico
+plot(prune.boston)
+text(prune.boston,pretty=0)
+
+# Estimamos la predicciÃ³n en el conjunto de prueba, pero usando el Ã¡rbol sin podar (que es el
+# que estÃ¡ bien)
+yhat=predict(tree.boston,newdata=Boston[-train,])
+yhat2=predict(tree.boston2,newdata=Boston[-train,])
+boston.test=Boston[-train,"medv"]
+
+# Graficamos  
+plot(yhat,boston.test)
+abline (0,1)
+
+# O mÃ¡s lindo:
+ggplot(data.frame(boston.test,yhat), aes(x=yhat, y=boston.test)) +
+  geom_point(shape=1) +   
+  geom_smooth(method=lm, se= F)   
+
+# Computamos el ECM de ambos Ã¡rboles de regresiÃ³n
+ECM1=mean((yhat2-boston.test)^2)
+ECM2=mean((yhat-boston.test)^2)
+# La diferencia es mÃ­nima. El ECM es aprox 25, por lo que su raÃ­z cuadrada es 5.
+
+# Error del Ã¡rbol limpio con menos nodos terminales  
+ECM3=mean((predict(prune.boston,newdata=Boston[-train,])-boston.test)^2)
+# Error es mayor ya que por CV habÃ­amos encontrado que se debÃ­an usar 7 nodos y no 5 
+
+list(ECM1,ECM2,ECM3)
